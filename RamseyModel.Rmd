@@ -1,0 +1,174 @@
+---
+title: "RamseyModel"
+author: "/"
+date: "2021/11/14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## コードの説明
+
+mainで全ての関数を起動します
+
+
+```{r cars, echo=TRUE}
+main <- function(){
+  set_init_state() -> init_state
+  set_param(init_state) -> param
+  calculate_con_kap(param, init_state) -> con_kap
+  plot_phase_diagram(con_kap)
+  frame_maker(init_state, param) -> frame
+  return(list(con_kap, frame))
+}
+```
+
+### パラメータのセッティング
+
+＜set_init_state＞  
+初期の状態（Y, C, K, w, r, A）を出します  
+Y, C, K, wは日本を参考に求め、rは導出します。Aは１で固定しています。
+
+＜set_param＞  
+パラメータ(α, β, δ, L, t)を設定します  
+ただ、δ, t以外は上記から導出されます  
+このパラメータは各期を通じて不変と仮定しています  
+
+諸々のパラメータを設定したため  
+Y = AK^α が成り立ちません。  
+つまり教科書のように　L = 1　の仮定が成り立たないので式(2.36)を参考に設定し直します。  
+成長モデルではないのでLはあまり要らない子かも。
+
+```{r param_setting, echo=TRUE}
+set_init_state <- function(){
+  init_Yield <- rnorm(n=1, mean=420, sd=70)
+  init_Consumption <- rnorm(n=1, mean=300, sd=50)
+  init_Kapital <- rnorm(n=1, mean=3000, sd=500)
+  init_wage <- rnorm(n=1, mean=300, sd=50)
+  init_rental <- (init_Yield - init_wage) / init_Kapital
+  init_Aggression <- 1
+  
+  init_state <- c(init_Yield, init_Consumption, init_Kapital, init_wage, init_rental, init_Aggression)
+  return(init_state)
+}
+
+set_param <- function(init_state){
+  alpha <- 1 - init_state[4] / init_state[1]
+  beta <- 1 / (1 + init_state[5])
+  delta <- 0.20
+  Labor <- ((init_state[3] ^ -alpha) * init_state[1] / init_state[6]) ^ (1 / (1 - alpha))
+  Time <- 20
+  
+  param <- c(alpha, beta, delta, Labor, Time)
+  return(param)
+}
+
+```
+
+### 各期の状態の導出
+
+Y : 式(2.36)　から導出  Y = AK^α*L^(1-α)  
+C : 式(2.42)　から導出  C(t) = C(t-1) * β *(AK^(α-1)-δ+1)  
+K : 式(2.43)　から導出  K(t) = AK^α + (1-δ)(K(t-1))^(α-1) - c(t-1)  
+w : 産出量Yのうち資本分配率αに従い (1-α)Y だけ獲得  
+r : wと同様に αY = rK  <=>  r = αY/K　で求まる  
+
+このモデルでは1期目のCが分からないのでは？  
+\　->　C1は初期に設定することにした
+
+
+```{r calculate, echo=TRUE}
+calculate_con_kap <- function(param, init_state){
+  Yield <- rep(0,param[5])
+  Consumption <- rep(0, param[5])
+  Kapital <- rep(0, param[5])
+  wage <- rep(0, param[5])
+  rental <- rep(0, param[5])
+  Time <- 1:param[5]
+  
+  Yield[1] <- init_state[1]
+  Consumption[1] <- init_state[2]
+  Kapital[1] <- init_state[3]
+  wage[1] <- init_state[4]
+  rental[1] <- init_state[5]
+  
+  for (i in 2:param[5]) {
+    Kapital[i] <- Yield[i-1] + (1 - param[3]) * Kapital[i-1] - Consumption[i-1]
+    Yield[i] <- init_state[6] * Kapital[i] ^ param[1] * param[4] ^ (1 - param[1])
+    wage[i] <- (1 - param[1]) * Yield[i]
+    rental[i] <- param[1] * Yield[i] / Kapital[i]
+    Consumption[i] <- Consumption[i-1] * param[2] *(rental[i] - param[3] + 1)
+  }
+  
+  Y <- data.frame(Time, Yield, Consumption, Kapital, wage, rental)
+  return(Y)
+}
+
+```
+
+### 作図
+
+現状位相図のみ  
+図2.7や図2.8のC,Kの値はYに対する割合ではなく適当(だと思う)ので注意
+
+```{r plot, echo=TRUE}
+plot_phase_diagram <- function(con_kap){
+  plot(Consumption ~ Kapital, data = con_kap, type = "o")
+}
+```
+
+### プログラムの起動
+
+最後の行のmain()で全てを動かします。  
+コード全部一気にやっちゃえばいいのではないでしょうか  
+frame_makerはただの表加工です
+
+```{r main, echo=TRUE}
+frame_maker <- function(init_state, param){
+  name1 <- c("Yield", "Consumption", "Kapital", "wage", "rental", "Aggression")
+  name2 <- c("alpha", "beta", "delta", "Labor", "Time")
+  initial_state <- round(init_state, digits = 4)
+  parameter <- round(param, digits = 4)
+  X <- data.frame(name1,initial_state)
+  Y <- data.frame(name2, parameter)
+  return(list(X,Y))
+}
+
+main()
+```
+
+##課題
+
+### 1. 消費が減り過ぎる
+定常状態のCを式(2.50)を参考に計算する(L=1でないことに注意)と、  
+\ K=1000, α=0.33のとき（毎回だいたいT=20ではそんなもん）  
+\ C = Y - δK  
+\   = 250 - 0.25*1000  
+\   = 0  
+と定常状態のCはほぼ０になってしまう。  
+原因を考えると  
+\  A.プログラムのミス  
+\ 　-> 無くはないが、初期の方は適切な値が出てる気が  
+\  B.オイラー方程式(2.42)によるもの  
+\   -> r > δ　出ない限り（ほぼない）  
+\      C(t+1)がC(t)を上回ることはないのでは  
+\   -> 消費が単調減少してしまう  
+\  C.資本の遷移式に問題がある  
+\   -> Kは妥当な値が出ている気が  
+\  D.初期のパラメータがクソ  
+\   -> パラメータは日本のGDP(兆単位)を参考、利子率は妥当では  
+\      兆も考慮して計算しなおしても消費が100分の1くらいになり同じカーブが出てくる  
+\  E.モデルの解釈がどっか違う
+ 
+BかEが大きいと思うんですがどうなんすかね
+
+### 2. 資本が一回減ってから持ち直す謎のカーブが現れる
+よくわかりませんでした！おしえてたくみくん！
+
+### 3. 拡張可能性について
+- Lの値をいじる　  -> 人口成長モデルを立てられる
+- Aの値をいじる    -> 技術生産性の上昇を取り込める
+- 他の図の作成     -> 時間tや生産Yもデータフレームで生成しているため簡単に描ける(例えば図2.8とか)
+- 課税理論への応用 -> 図3.1のようなものが割と簡単に描けるはず
